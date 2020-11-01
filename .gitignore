@@ -140,3 +140,4 @@ cython_debug/
 # Custom
 CONFIG.py
 Logs/*
+big_diff.txt

@@ -9,3 +9,7 @@ class NotAllowedStatusException(Exception):
 class FailedToParseException(Exception):
     def __init__(self, command: Command) -> None:
         super().__init__(f"{Command.qualified_name}")
+
+class SomethingWentWrong(Exception):
+    def __init__(self, command:Command) -> None:
+        super().__init__(f"{Command.qualified_name}에 모르는 에1러")

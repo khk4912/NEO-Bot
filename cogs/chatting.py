@@ -3,6 +3,7 @@ import datetime
 import json
 import random
 import re
+from re import L
 from typing import Union
 
 from bs4 import BeautifulSoup
@@ -12,7 +13,7 @@ from discord.ext import commands
 import CONFIG
 from utils.embed import Embed
 from utils.http import HTTP
-from utils.invoke import Invoke
+from utils.invoke import Invoke, need_chunk, with_typing
 from utils.logs import Logs
 
 
@@ -23,6 +24,9 @@ class Chatting(commands.Cog):
 
     async def cog_after_invoke(self, ctx):
         await Invoke.after_invoke(ctx, self.logger)
+
+    def _html_to_str(self, tag: str) -> str:
+        return BeautifulSoup(tag, "lxml").text
 
     def _lxml_string(self, soup: BeautifulSoup, tag: str) -> str:
         try:
@@ -274,28 +278,36 @@ class Chatting(commands.Cog):
     @commands.command(name="리마인더")
     async def reminder(self, ctx, *, args):
         rmd_pat = r"(\d{1,2}h)?\s?(\d{1,2}m)?\s?(\d*s)?"
-        hms = re.search(rmd_pat, args).groups()
-
-        if hms == (None, None, None):
+        hms = re.search(rmd_pat, args)
+        hms_group = hms.groups()
+        if hms_group == (None, None, None):
             # Embed.warn(
             #     "주의",
             #     "시간 파싱에 실패했어요. 아래 예시를 참고해주세요.\n\n`봇 리마인더 3h` (3시간)\n`봇 리마인더 1h 30m` (1시간 30분)\n`봇 리마인더 20s` (20초)",
             # )
             raise commands.BadArgument()
-
-        hour = int(hms[0].split("h")[0]) if hms[0] is not None else 0
-        minute = int(hms[1].split("m")[0]) if hms[1] is not None else 0
-        seconds = int(hms[2].split("s")[0]) if hms[2] is not None else 0
+        reason = args.replace(hms.group(0), "")
+        hour = (
+            int(hms_group[0].split("h")[0]) if hms_group[0] is not None else 0
+        )
+        minute = (
+            int(hms_group[1].split("m")[0]) if hms_group[1] is not None else 0
+        )
+        seconds = (
+            int(hms_group[2].split("s")[0]) if hms_group[2] is not None else 0
+        )
 
         total_seconds = hour * 3600 + minute * 60 + seconds
 
         n_hour = total_seconds // 3600
         n_minutes = total_seconds % 3600 // 60
         n_seconds = total_seconds % 3600 % 60
-
         embed = Embed.check(
             "리마인더", f"{n_hour}시간 {n_minutes}분 {n_seconds}초 후에 알려드릴께요!"
         )
+        print(reason)
+        if not reason == "":
+            embed.add_field(name="사유", value=reason)
         embed.set_footer(text="봇이 종료되면 울리지 않아요!")
         await ctx.send(embed=embed)
         await asyncio.sleep(total_seconds)
@@ -303,6 +315,8 @@ class Chatting(commands.Cog):
         embed = discord.Embed(
             title="⏰ 알림", description="시간이 다 되었어요!", color=0x1DC73A
         )
+        if not reason == "":
+            embed.add_field(name="사유", value=reason)
         await ctx.send(embed=embed)
 
     @commands.command(name="조의", aliases=["joy"])
@@ -332,24 +346,24 @@ class Chatting(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command(name="지진")
+    @with_typing
     async def get_earthquake(self, ctx):
-        async with ctx.channel.typing():
-            c = await HTTP.get("https://m.kma.go.kr/m/eqk/eqk.jsp?type=korea")
-            soup = BeautifulSoup(c, "lxml")
+        c = await HTTP.get("https://m.kma.go.kr/m/eqk/eqk.jsp?type=korea")
+        soup = BeautifulSoup(c, "lxml")
 
-            table = [
-                x.text.strip()
-                for x in soup.select(".sub-bd2 > table")[0].select("tr > td")
-            ]
+        table = [
+            x.text.strip()
+            for x in soup.select(".sub-bd2 > table")[0].select("tr > td")
+        ]
 
-            img = soup.select(".img-center > a > img")[0]["src"]
+        img = soup.select(".img-center > a > img")[0]["src"]
 
-            date = table[1]
-            mag = table[3]
-            max_mag = table[5]
-            location = table[7]
-            depth = table[9]
-            detail = table[10]
+        date = table[1]
+        mag = table[3]
+        max_mag = table[5]
+        location = table[7]
+        depth = table[9]
+        detail = table[10]
 
         embed = discord.Embed(title="지진 정보", description=date, color=0x62BF42)
         embed.add_field(name="규모 (불확도)", value=mag)
@@ -374,6 +388,7 @@ class Chatting(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command(name="미세먼지", aliases=["초미세먼지"])
+    @with_typing
     async def fine_dust(self, ctx, *, args=None):
         params = {
             "serviceKey": CONFIG.MISAE,
@@ -384,21 +399,21 @@ class Chatting(commands.Cog):
             "itemCode": "PM10",
             "dataGubun": "HOUR",
         }
-        async with ctx.channel.typing():
-            misae_c = await HTTP.get(
-                url="http://openapi.airkorea.or.kr/openapi/services/rest/ArpltnInforInqireSvc/getCtprvnMesureLIst",
-                params=params,
-            )
-            soup = BeautifulSoup(misae_c, "lxml-xml")
-            misae_sido = self._handle_pm(soup)
 
-            params["itemCode"] = "PM25"
-            chomisae_c = await HTTP.get(
-                url="http://openapi.airkorea.or.kr/openapi/services/rest/ArpltnInforInqireSvc/getCtprvnMesureLIst",
-                params=params,
-            )
-            soup = BeautifulSoup(chomisae_c, "lxml-xml")
-            chomisae_sido = self._handle_pm(soup)
+        misae_c = await HTTP.get(
+            url="http://openapi.airkorea.or.kr/openapi/services/rest/ArpltnInforInqireSvc/getCtprvnMesureLIst",
+            params=params,
+        )
+        soup = BeautifulSoup(misae_c, "lxml-xml")
+        misae_sido = self._handle_pm(soup)
+
+        params["itemCode"] = "PM25"
+        chomisae_c = await HTTP.get(
+            url="http://openapi.airkorea.or.kr/openapi/services/rest/ArpltnInforInqireSvc/getCtprvnMesureLIst",
+            params=params,
+        )
+        soup = BeautifulSoup(chomisae_c, "lxml-xml")
+        chomisae_sido = self._handle_pm(soup)
 
         embed = discord.Embed(
             title="💨 미세먼지",
@@ -432,6 +447,7 @@ class Chatting(commands.Cog):
 
     @commands.command(name="프사", aliases=["프로필", "프로필사진"])
     @commands.guild_only()
+    @need_chunk
     async def profile_emoji(
         self, ctx, *, user: Union[discord.Member, int, str] = None
     ):
@@ -455,9 +471,9 @@ class Chatting(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command(name="한강")
+    @with_typing
     async def hangang(self, ctx):
-        async with ctx.channel.typing():
-            data = await HTTP.get("http://hangang.dkserver.wo.tc/")
+        data = await HTTP.get("http://hangang.dkserver.wo.tc/")
 
         assert isinstance(data, str)
         data = json.loads(data)
@@ -473,6 +489,267 @@ class Chatting(commands.Cog):
         else:
             embed = Embed.error(title="오류", description="API에서 정보를 받지 못했어요!")
         await ctx.send(embed=embed)
+
+    @commands.command(name="영한번역")
+    @with_typing
+    async def en_to_ko(self, ctx, *, args):
+        a = args.lstrip()
+        trans = await self._nmt("en", "ko", a)
+        if trans is None:
+            embed = discord.Embed(
+                title="❌ 오류 발생", description="번역에 오류가 발생하였어요.", color=0xFF0909,
+            )
+            await ctx.send(embed=embed)
+        else:
+            embed = discord.Embed(
+                title="✅ 한국어 번역", description=trans, color=0x1DC73A
+            )
+            await ctx.send(embed=embed)
+
+    @commands.command(name="한영번역")
+    @with_typing
+    async def ko_to_en(self, ctx, *, args):
+        a = args.strip()
+        trans = await self._nmt("ko", "en", a)
+        if trans is None:
+            embed = discord.Embed(
+                title="❌ 오류 발생", description="번역에 오류가 발생하였어요.", color=0xFF0909,
+            )
+            await ctx.send(embed=embed)
+        else:
+            embed = discord.Embed(
+                title="✅ 영어 번역", description=trans, color=0x1DC73A
+            )
+            await ctx.send(embed=embed)
+
+    @commands.command(name="한일번역")
+    @with_typing
+    async def ko_to_ja(self, ctx, *, args):
+        a = args.strip()
+        trans = await self._nmt("ko", "ja", a)
+        if trans is None:
+            embed = discord.Embed(
+                title="❌ 오류 발생", description="번역에 오류가 발생하였어요.", color=0xFF0909,
+            )
+            await ctx.send(embed=embed)
+        else:
+            embed = discord.Embed(
+                title="✅ 일본어 번역", description=trans, color=0x1DC73A
+            )
+            await ctx.send(embed=embed)
+
+    @commands.command(name="일한번역")
+    @with_typing
+    async def ja_to_ko(self, ctx, *, args):
+        a = args.strip()
+        trans = await self._nmt("ja", "ko", a)
+        if trans is None:
+            embed = discord.Embed(
+                title="❌ 오류 발생", description="번역에 오류가 발생하였어요.", color=0xFF0909,
+            )
+            await ctx.send(embed=embed)
+        else:
+            embed = discord.Embed(
+                title="✅ 한글 번역", description=trans, color=0x1DC73A
+            )
+            await ctx.send(embed=embed)
+
+    @commands.command(name="자동번역", aliases=["번역"])
+    @with_typing
+    async def translate(self, ctx, *, args):
+        a = args.strip()
+        headers = {
+            "X-Naver-Client-Id": CONFIG.PAPAGO_DETECT_ID,
+            "X-Naver-Client-Secret": CONFIG.PAPAGO_DETECT_SECRET,
+        }
+        data = {"query": a}
+
+        r = await HTTP.post(
+            "https://openapi.naver.com/v1/papago/detectLangs",
+            data=data,
+            headers=headers,
+            json=True,
+        )
+        assert isinstance(r, dict)
+        langcode = r["langCode"]
+        langcode = langcode.replace("zh-cn", "zh-CN")
+        langcode = langcode.replace("zh-tw", "zh-TW")
+
+        trans = None
+        if langcode == "ko":
+            trans = await self._nmt("ko", "en", a)
+
+        else:
+            trans = await self._nmt(langcode, "ko", a)
+
+        if trans is None:
+            embed = discord.Embed(
+                title="❌ 오류 발생",
+                description="언어 감지 중 오류가 발생했어요.",
+                color=0xFF0909,
+            )
+            await ctx.send(embed=embed)
+        else:
+            embed = discord.Embed(
+                title="✅ 자동 번역", description=trans, color=0x1DC73A,
+            )
+            embed.set_footer(text=langcode)
+            await ctx.send(embed=embed)
+
+    @commands.command(name="사전", aliases=["백과사전"])
+    @with_typing
+    async def dictionary(self, ctx, *, args):
+        a = args.strip()
+        headers = {
+            "X-Naver-Client-Id": CONFIG.SEARCH_ID,
+            "X-Naver-Client-Secret": CONFIG.SEARCH_SECRET,
+        }
+
+        data = await HTTP.get(
+            "https://openapi.naver.com/v1/search/encyc.json",
+            params={"query": a},
+            headers=headers,
+            json=True,
+        )
+        assert isinstance(data, dict)
+        data = data["items"][0]
+        title = self._html_to_str(data["title"])
+        link = data["link"]
+        thumbnail = data["thumbnail"]
+        description = self._html_to_str(data["description"])
+
+        embed = discord.Embed(
+            title="🔖 백과사전",
+            description=f"**{title}**에 대한 검색결과에요.",
+            color=0x237CCD,
+        )
+        embed.add_field(
+            name="내용", value=f"{description[:500]}\n\n[더 읽기]({link})"
+        )
+        embed.set_thumbnail(url=thumbnail)
+        await ctx.send(embed=embed)
+
+    @commands.command(name="서버정보", aliases=["서정"])
+    @commands.guild_only()
+    @need_chunk
+    async def guild_chunk(self, ctx):
+        now = datetime.datetime.now()
+        creeated_at = ctx.guild.created_at
+        now = datetime.datetime.now()
+        created_at = ctx.guild.created_at + datetime.timedelta(hours=9)
+        dap = now - created_at
+        created_at = created_at.strftime("%Y-%m-%d %H:%M:%S")
+
+        members = ctx.guild.members
+        bot_count = len([x for x in members if x.bot])
+        members_count = len(members)
+
+        txt_ch_cnt = len(ctx.guild.text_channels)
+        voi_ch_cnt = len(ctx.guild.voice_channels)
+
+        embed = discord.Embed(
+            title="📝 서버 정보",
+            description="이 서버에 대한 정보를 불러왔어요.​　　　　　​",
+            color=0x1DC73A,
+        )
+        embed.add_field(name="이름", value=ctx.guild.name, inline=False)
+        embed.add_field(name="서버 ID", value=ctx.guild.id, inline=False)
+        embed.add_field(
+            name="서버 인원",
+            value=f"{members_count}명\n(유저 {members_count- bot_count}명, 봇 {bot_count}개)　　​",
+            inline=True,
+        )
+        embed.add_field(
+            name="서버 채널",
+            value=f"{txt_ch_cnt + voi_ch_cnt}개\n(텍스트 {txt_ch_cnt}개, 음성 {voi_ch_cnt}개)",
+            inline=True,
+        )
+
+        embed.add_field(name="음성 서버 위치", value=ctx.guild.region, inline=False)
+        embed.add_field(name="서버 오너", value=ctx.guild.owner, inline=True)
+        embed.add_field(
+            name="서버 생성일", value=f"{created_at}\n({dap.days}일 전)", inline=True,
+        )
+
+        embed.add_field(
+            name="서버 부스트", value=f"{ctx.guild.premium_tier}단계", inline=True,
+        )
+
+        embed.set_thumbnail(url=ctx.guild.icon_url)
+        await ctx.send(embed=embed)
+
+    @commands.command(name="유저정보", aliases=["유저", "유정"])
+    @commands.guild_only()
+    @need_chunk
+    async def user_info(
+        self, ctx, *, user: Union[discord.Member, int, str] = None
+    ):
+        try:
+            if user is None:
+                user = ctx.author
+            elif isinstance(user, int):
+                user = ctx.guild.get_member(user)
+            elif isinstance(user, str):
+                user = ctx.guild.get_member_named(user)
+                if user is None:
+                    raise commands.BadArgument()
+            now = datetime.datetime.now()
+            created_at = user.created_at + datetime.timedelta(hours=9)
+            dap_created = now - created_at
+            created_at = created_at.strftime("%Y-%m-%d %H:%M:%S")
+
+            joined_at = user.joined_at + datetime.timedelta(hours=9)
+            dap_joined = now - joined_at
+            joined_at = joined_at.strftime("%Y-%m-%d %H:%M:%S")
+
+            avatar_url = user.avatar_url
+
+            embed = discord.Embed(
+                title="👥 유저 정보",
+                description="선택하신 유저에 대한 정보를 불러왔어요.　　　​",
+                color=0x1DC73A,
+            )
+            embed.add_field(name="이름", value=user.name, inline=False)
+            embed.add_field(name="유저 ID", value=user.id, inline=False)
+            embed.add_field(
+                name="계정 생성일",
+                value=f"{created_at}\n({dap_created.days}일 전)",
+                inline=True,
+            )
+            embed.add_field(
+                name="서버 가입일",
+                value=f"{joined_at}\n({dap_joined.days}일 전)",
+                inline=True,
+            )
+            embed.set_thumbnail(url=avatar_url)
+            await ctx.send(embed=embed)
+        except:
+            embed = Embed.warn(
+                "주의", "`봇 유저정보 (멘션 or ID or 이름)` 으로 사용해주세요.\n유저를 불러오지 못했어요.",
+            )
+            embed.set_footer(text="이 서버에 있는 유저가 아니면 검색이 불가해요.")
+            await ctx.send(embed=embed)
+
+    @commands.command(name="질문")
+    async def question(self, ctx):
+        response = [
+            "아니요?",
+            "아뇨?",
+            "어...음...네",
+            "흐음...아뇨?",
+            "모르겠어요",
+            "네",
+            "맞아요",
+            "흐음...몰라요",
+        ]
+        a = random.choice(response)
+        await ctx.send(a)
+
+    @commands.command(name="확률")
+    async def perpu(self, ctx, *, args):
+        a = args.strip()
+        per = random.randint(0, 100)
+        await ctx.send(f"{a} 확률은 **{per}%** 입니다.")
 
 
 # TODO : 도움, 문의

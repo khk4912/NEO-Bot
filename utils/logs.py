@@ -1,6 +1,6 @@
 import logging
 from CONFIG import PRI_FORMATTER
-from discord.ext.commands.bot import Cog
+from discord.ext.commands.bot import Cog, HelpCommand
 
 
 class Logs:
